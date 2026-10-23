@@ -71,6 +71,29 @@ end
         @test fetch(pending) isa MQTTException
     end
 
+    @testset "read_loop: connection lost" begin
+        c = MQTTClient.Client()
+        @atomicswap c.state = 0x01
+        pending = c.in_flight[0x0001] = Future()
+        c.socket = PipeBuffer()  # at end of stream, as after the broker closes the socket
+        @test MQTTClient.read_loop(c) == 0x00
+        @test !MQTTClient.isconnected(c)
+        @test fetch(pending) isa MQTTException
+        # Calls on the closed client fail instead of waiting for a write loop that has stopped
+        @test_throws MQTTException publish(c, "foo", "bar"; qos=QOS_1)
+        @test_throws MQTTException subscribe(c, "foo", (t, p) -> nothing)
+        @test_throws MQTTException unsubscribe(c, "foo")
+    end
+
+    @testset "keep_alive_loop: no PINGRESP" begin
+        c = MQTTClient.Client(UInt64(0))  # ping_timeout 0: the first PINGREQ is already overdue
+        @atomicswap c.state = 0x01
+        pending = c.in_flight[0x0001] = Future()
+        @test MQTTClient.keep_alive_loop(c) == 0x00
+        @test !MQTTClient.isconnected(c)
+        @test fetch(pending) isa MQTTException
+    end
+
     @testset "write_loop" begin
         c = MQTTClient.Client()
         c.socket = TCPSocket()

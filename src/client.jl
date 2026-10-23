@@ -83,6 +83,9 @@ function write_loop(client::Client)::UInt8
                     mqtt_write(buffer, i)
                 end
                 data = take!(buffer)
+                # Mark the client as closing before the broker can answer DISCONNECT by closing the
+                # socket, so read_loop does not take that for a lost connection
+                packet.cmd === DISCONNECT && @atomicreplace client.state 0x01 => 0x02
                 lock(client.socket_lock)
                 write(client.socket, packet.cmd)
                 write_len(client.socket, length(data))
@@ -136,11 +139,16 @@ function read_loop(client::Client)::UInt8
                     close_with_error(client, MQTTException("Unexpected packet type 0x$(string(cmd; base=16))"))
                 end
             else
+                # End of stream without our DISCONNECT: the broker or the network dropped us
+                if isconnected(client)
+                    close_with_error(client, MQTTException("Connection lost"))
+                    break
+                end
                 sleep(0.0001)
             end
         end
 
-        @debug "ending write loop!"
+        @debug "ending read loop!"
         return 0x00
     catch e
         @debug "Read Loop threw a $(typeof(e)) Exception."
@@ -193,18 +201,9 @@ function keep_alive_loop(client::Client)::UInt8
 
         if @atomic(client.ping_outstanding) == 1 &&
             time() - ping_sent >= client.ping_timeout
-            try # No pingresp received
-                disconnect(client)
-                break
-            catch e
-                # channel closed
-                @atomicswap client.state = 0x03
-                if isa(e, InvalidStateException)
-                    break
-                else
-                    rethrow()
-                end
-            end
+            # No PINGRESP: the connection is half-open (e.g. the network went away without a FIN)
+            close_with_error(client, MQTTException("No PINGRESP within $(client.ping_timeout)s"))
+            break
             # TODO automatic reconnect
         end
 
