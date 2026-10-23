@@ -8,7 +8,7 @@ function handle_connack(client::Client, s::IO, cmd::UInt8, flags::UInt8)
         @atomicreplace client.state 0x00 => 0x01
         put!(future, session_present)
     else
-        protocol_error(client, MQTTException(CONNACK_ERRORS[return_code]))
+        close_with_error(client, MQTTException(CONNACK_ERRORS[return_code]))
         return future
     end
 end
@@ -49,7 +49,7 @@ function handle_ack(client::Client, s::IO, cmd::UInt8, flags::UInt8)
         put!(future, nothing)
         delete!(client.in_flight, id)
     else
-        protocol_error(client, MQTTException("Unexpected acknowledgement for packet id $id"))
+        close_with_error(client, MQTTException("Unexpected acknowledgement for packet id $id"))
     end
 end
 
@@ -69,7 +69,7 @@ function handle_suback(client::Client, s::IO, cmd::UInt8, flags::UInt8)
     if haskey(client.in_flight, id)
         put!(client.in_flight[id], return_codes)
     else
-        protocol_error(client, MQTTException("Unexpected SUBACK for packet id $id"))
+        close_with_error(client, MQTTException("Unexpected SUBACK for packet id $id"))
     end
 end
 

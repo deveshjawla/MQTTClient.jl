@@ -133,7 +133,7 @@ function read_loop(client::Client)::UInt8
                     @atomicswap client.last_received = time()
                     HANDLERS[cmd](client, buffer, cmd, flags)
                 else
-                    protocol_error(client, MQTTException("Unexpected packet type 0x$(string(cmd; base=16))"))
+                    close_with_error(client, MQTTException("Unexpected packet type 0x$(string(cmd; base=16))"))
                 end
             else
                 sleep(0.0001)
@@ -226,9 +226,9 @@ function write_packet(client::Client, cmd::UInt8, data...)
     return put!(client.write_packets, Packet(cmd, data))
 end
 
-# Ends the session after a protocol violation (MQTT 3.1.1 section 4.8): every call still waiting
-# for the broker gets `e`, and the network connection is closed.
-function protocol_error(client::Client, e::MQTTException)
+# Ends the session after an error such as a protocol violation (MQTT 3.1.1 section 4.8): every call
+# still waiting for the broker gets `e`, and the network connection is closed.
+function close_with_error(client::Client, e::MQTTException)
     @atomicswap client.state = 0x03
     for future in values(client.in_flight)
         isready(future) || put!(future, e)
